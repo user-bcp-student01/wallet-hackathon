@@ -1,5 +1,6 @@
 """Agente inicial del taller. Mejora sus instrucciones sin cambiar su contrato."""
 from crewai import Agent, Task
+from agents.feature_scope import is_onboarding_feature, scoped_instructions
 from crew.llm_config import llm
 
 KEY = 'architect'
@@ -7,7 +8,7 @@ LABEL = 'Arquitecto'
 SPEC_FILE = 'user_story.md'
 EXTRACT_CODE = False
 
-INSTRUCTIONS = """
+PAYMENT_GUIDANCE = """
 Actúa como arquitecto senior con experiencia en banca, servicios financieros y
 diseño de aplicaciones responsive. Define una solución implementable para la
 funcionalidad recibida, alineada con sus criterios de aceptación y el contexto
@@ -83,13 +84,67 @@ Marca las comprobaciones propuestas como NO EJECUTADO. Si recibes feedback,
 corrige la especificación y explica qué observaciones resolviste y cuáles siguen
 pendientes. No sustituyas la aprobación humana.
 """
-agent = Agent(role='Arquitecto', goal="Definir una arquitectura bancaria monolítica modular, responsive y preparada para integrar pagos en backend.",
+
+INSTRUCTIONS = """
+Actúa como arquitecto senior. Define una solución implementable para la
+funcionalidad recibida, alineada con sus criterios de aceptación y el contexto
+aprobado. Especifica los componentes, contratos, responsabilidades y recorrido
+de datos que requiere esa funcionalidad. No generes código ni afirmes que algo
+está implementado.
+
+Respeta los contratos y convenciones existentes. No inventes requisitos,
+endpoints, capacidades de proveedores ni resultados de pruebas. Mantén el
+alcance en la funcionalidad recibida y declara dependencias o preguntas
+pendientes.
+"""
+
+ONBOARDING_GUIDANCE = """
+Aplica estas reglas solo porque la funcionalidad seleccionada es onboarding:
+- Define un flujo responsive guiado que muestre los pasos requeridos y el paso
+  actual. Bloquea avance por datos obligatorios ausentes o inválidos y muestra
+  cómo corregirlos.
+- Usa exclusivamente datos TEST, incluidos documentos con prefijo TEST- y
+  números de celular de prueba. No habilites operaciones financieras reales.
+- El OTP es una simulación local en el frontend: genera/compara el código fijo
+  de demo 123456 y permite que el tester lo ingrese manualmente. Documenta o
+  muestra el código para el tester; no llames APIs para OTP, no agregues rutas
+  y no envíes SMS. No presentes la simulación como verificación real de titularidad.
+- Usa el mock existente solo para KYC conforme a su contrato. Mapea scenario
+  APPROVED/status ACTIVE a wallet activa, MANUAL_REVIEW/status PENDING a revisión
+  pendiente y REJECTED/status REJECTED a rechazo. Para revisión manual usa la
+  capacidad de decisión del mock; no propongas una consola independiente.
+- Registra inicio, finalización de cada paso y cierre. Mide desde el inicio hasta
+  el envío exitoso de los datos de todos los pasos; reporta aparte revisión KYC
+  y tiempo hasta activación.
+- No incluyas pagos, QR, historial, soporte de pagos, MAU, CAC ni medición de
+  checkout en esta funcionalidad.
+
+Entrega una especificación de onboarding con recorrido, contratos existentes
+necesarios, estados, criterios de aceptación verificables, casos negativos,
+dependencias y preguntas pendientes. No inventes datos personales ni evidencia.
+"""
+agent = Agent(role='Arquitecto', goal="Definir una solución implementable, alineada con el alcance y los contratos aprobados de cada funcionalidad.",
               backstory="Eres un arquitecto senior de banca con experiencia en servicios transaccionales, contratos de API y aplicaciones responsive accesibles.", llm=llm,
               verbose=True, allow_delegation=False)
 
 
 def build_task(feature: dict) -> Task:
-    return Task(description=INSTRUCTIONS + "\nFeature: " + str(feature.get("title", ""))
+    instructions = scoped_instructions(
+        feature,
+        INSTRUCTIONS,
+        onboarding=ONBOARDING_GUIDANCE,
+        payment=PAYMENT_GUIDANCE,
+    )
+    onboarding = is_onboarding_feature(feature)
+    return Task(description=instructions + "\nFeature: " + str(feature.get("title", ""))
                 + "\n" + str(feature.get("description", ""))
                 + "\n" + str(feature.get("acceptance_criteria", [])),
-                expected_output='Especificación Markdown con historia de usuario, arquitectura monolítica modular, contratos de API, diseño responsive, integración futura de pagos y criterios verificables; sin código ni resultados inventados.', agent=agent)
+                expected_output=(
+                    "Especificación Markdown de onboarding con recorrido, estados KYC, "
+                    "contratos pertinentes, criterios verificables y límites de alcance; "
+                    "sin código ni resultados inventados."
+                    if onboarding else
+                    "Especificación Markdown con alcance, arquitectura, contratos y "
+                    "criterios verificables de la funcionalidad, sin código ni "
+                    "resultados inventados."
+                ), agent=agent)

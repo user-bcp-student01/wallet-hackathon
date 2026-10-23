@@ -4,13 +4,21 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import main as app
+from agents import architect, chapter, frontend, security, testing
 from crew.workflow import ROLES, STEPS, DATA_ROLES, build_tasks, workflow_steps, include_data
 
+
+ONBOARDING_FEATURE = {
+    "title": "Registro y activacion del MVP de wallet",
+    "description": "Completar el onboarding de prueba",
+    "acceptance_criteria": ["Mostrar el estado KYC"],
+}
 
 FEATURE = {
     "title": "Transfer funds",
@@ -20,6 +28,69 @@ FEATURE = {
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_architect_and_frontend_receive_onboarding_scope_guidance(self):
+        required_guidance = (
+            "paso actual",
+            "123456",
+            "ACTIVE",
+            "PENDING",
+            "REJECTED",
+            "TEST-",
+            "MAU",
+            "CAC",
+            "checkout",
+            "genera/compara",
+            "sms",
+        )
+        for role in (architect, frontend):
+            with self.subTest(role=role.KEY):
+                prompt = " ".join(role.build_task(ONBOARDING_FEATURE).description.casefold().split())
+                for text in required_guidance:
+                    self.assertIn(text.casefold(), prompt)
+                self.assertRegex(prompt, r"env[ií]o exitoso")
+                self.assertTrue(
+                    "no llames apis para otp" in prompt
+                    or "no hagas llamadas api para otp" in prompt
+                )
+
+    def test_testing_security_and_chapter_receive_onboarding_guidance(self):
+        required_guidance = (
+            "123456",
+            "frontend",
+            "sms",
+            "test",
+            "qr",
+            "historial",
+            "soporte",
+            "mau",
+            "cac",
+            "checkout",
+        )
+        for role in (testing, security, chapter):
+            with self.subTest(role=role.KEY):
+                prompt = role.build_task(ONBOARDING_FEATURE).description.casefold()
+                for text in required_guidance:
+                    self.assertIn(text, prompt)
+                if role in (testing, chapter):
+                    for status in ("active", "pending", "rejected"):
+                        self.assertIn(status, prompt)
+
+    def test_payment_feature_keeps_payment_guidance_without_onboarding_rules(self):
+        for role in (architect, frontend, testing, security, chapter):
+            with self.subTest(role=role.KEY):
+                prompt = role.build_task(FEATURE).description.casefold()
+                self.assertNotIn("123456", prompt)
+                self.assertNotIn("manual_review", prompt)
+        for role in (architect, frontend):
+            with self.subTest(payment_guidance=role.KEY):
+                prompt = role.build_task(FEATURE).description.casefold()
+                self.assertIn("idempotencia", prompt)
+                self.assertIn("pagos", prompt)
+        self.assertIn(
+            "destinatario e importe antes de confirmar",
+            frontend.build_task(FEATURE).description.casefold(),
+        )
+
     def test_each_role_builds_its_own_task(self):
         tasks = build_tasks(FEATURE)
         self.assertEqual(
