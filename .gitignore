@@ -5,7 +5,9 @@
 __pycache__/
 *.py[cod]
 .DS_Store
-output/
+output/.checkpoint.json
+output/backend-quarkus/target/
+output/frontend-angular/node_modules/
 .tmp/
 evidence/*
 !evidence/.gitkeep
